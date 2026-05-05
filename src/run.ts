@@ -33,6 +33,10 @@ import {
 } from "./AgentStreamEmitter.js";
 import type { SandboxHooks } from "./SandboxLifecycle.js";
 import { mergeProviderEnv } from "./mergeProviderEnv.js";
+import {
+  type CopyFileToSandbox,
+  resolveCopyFilesToSandbox,
+} from "./CopyFilesToSandbox.js";
 import { hostSessionStore } from "./SessionStore.js";
 import { defaultSessionPathsLayer } from "./SessionPaths.js";
 import { generateTempBranchName, getCurrentBranch } from "./WorktreeManager.js";
@@ -239,6 +243,8 @@ export interface RunOptions {
   readonly name?: string;
   /** Paths relative to the host repo root to copy into the worktree before sandbox start. */
   readonly copyToWorktree?: string[];
+  /** Files to copy from the host into the sandbox home before sandbox hooks run. */
+  readonly copyFilesToSandbox?: readonly CopyFileToSandbox[];
   /** Branch strategy — controls how the agent's changes relate to branches.
    * Defaults to { type: "head" } for bind-mount providers and { type: "merge-to-head" } for isolated providers. */
   readonly branchStrategy?: BranchStrategy;
@@ -317,6 +323,11 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
         "In head mode the host working directory is bind-mounted directly.",
     );
   }
+
+  const resolvedCopyFilesToSandbox = resolveCopyFilesToSandbox(
+    options.copyFilesToSandbox,
+    options.sandbox,
+  );
 
   // Validate: resumeSession + maxIterations > 1 is not allowed
   if (options.resumeSession && maxIterations > 1) {
@@ -417,6 +428,7 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
         env,
         hostRepoDir,
         copyToWorktree: options.copyToWorktree,
+        copyFilesToSandbox: resolvedCopyFilesToSandbox,
         name: options.name,
         sandboxProvider: options.sandbox,
         branchStrategy,

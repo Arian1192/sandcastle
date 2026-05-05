@@ -14,12 +14,51 @@ import {
   type IsolatedSandboxProvider,
 } from "../SandboxProvider.js";
 
-import type {
-  Daytona as DaytonaClient,
-  DaytonaConfig,
-  CreateSandboxFromImageParams,
-  CreateSandboxFromSnapshotParams,
-} from "@daytona/sdk";
+/** Minimal structural copy of Daytona resource options. */
+export interface DaytonaResources {
+  readonly cpu?: number;
+  readonly gpu?: number;
+  readonly memory?: number;
+  readonly disk?: number;
+}
+
+/** Minimal structural copy of Daytona volume mount options. */
+export interface DaytonaVolumeMount {
+  readonly volumeId: string;
+  readonly mountPath: string;
+}
+
+/** Minimal structural copy of Daytona create() base options. */
+export interface DaytonaCreateBaseOptions {
+  readonly name?: string;
+  readonly user?: string;
+  readonly language?: string;
+  readonly envVars?: Record<string, string>;
+  readonly labels?: Record<string, string>;
+  readonly public?: boolean;
+  readonly autoStopInterval?: number;
+  readonly autoArchiveInterval?: number;
+  readonly autoDeleteInterval?: number;
+  readonly volumes?: DaytonaVolumeMount[];
+  readonly networkBlockAll?: boolean;
+  readonly networkAllowList?: string;
+  readonly ephemeral?: boolean;
+}
+
+/** Minimal structural copy of Daytona SDK create() options. */
+export type DaytonaCreateOptions = DaytonaCreateBaseOptions &
+  (
+    | {
+        readonly image: string | object;
+        readonly resources?: DaytonaResources;
+        readonly snapshot?: never;
+      }
+    | {
+        readonly image?: never;
+        readonly resources?: never;
+        readonly snapshot?: string;
+      }
+  );
 
 /** Options for the Daytona sandbox provider. */
 export interface DaytonaOptions {
@@ -44,10 +83,11 @@ export interface DaytonaOptions {
   /**
    * Options passed through to the Daytona SDK when creating a sandbox.
    * Supports both image-based and snapshot-based creation.
+   *
+   * Typed structurally here so Sandcastle can build without requiring the
+   * optional `@daytona/sdk` peer dependency to be installed.
    */
-  readonly create?:
-    | CreateSandboxFromImageParams
-    | CreateSandboxFromSnapshotParams;
+  readonly create?: DaytonaCreateOptions;
 
   /** Environment variables injected by this provider. Merged at launch time with env resolver and agent provider env. */
   readonly env?: Record<string, string>;
@@ -71,16 +111,19 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
     name: "daytona",
     env: options?.env,
     create: async (): Promise<IsolatedSandboxHandle> => {
-      const { Daytona } =
-        (await import("@daytona/sdk")) as typeof import("@daytona/sdk");
+      const { Daytona } = await import("@daytona/sdk");
 
-      const config: DaytonaConfig = {};
+      const config: {
+        apiKey?: string;
+        apiUrl?: string;
+        target?: string;
+      } = {};
       if (options?.apiKey) config.apiKey = options.apiKey;
       if (options?.apiUrl) config.apiUrl = options.apiUrl;
       if (options?.target) config.target = options.target;
 
-      const client: DaytonaClient = new Daytona(config);
-      const sandbox = await client.create(options?.create as any);
+      const client = new Daytona(config);
+      const sandbox = await client.create(options?.create);
 
       const worktreePath =
         (await sandbox.getWorkDir()) ??

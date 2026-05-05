@@ -44,6 +44,10 @@ import { startSandbox } from "./startSandbox.js";
 import { syncOut } from "./syncOut.js";
 import * as WorktreeManager from "./WorktreeManager.js";
 import { copyToWorktree } from "./CopyToWorktree.js";
+import {
+  type CopyFileToSandbox,
+  resolveCopyFilesToSandbox,
+} from "./CopyFilesToSandbox.js";
 import { resolveCwd } from "./resolveCwd.js";
 import {
   type PromptArgs,
@@ -100,6 +104,8 @@ export interface WorktreeInteractiveOptions {
   readonly promptArgs?: PromptArgs;
   /** Environment variables to inject into the sandbox. */
   readonly env?: Record<string, string>;
+  /** Files to copy from the host into the sandbox home before sandbox hooks run. */
+  readonly copyFilesToSandbox?: readonly CopyFileToSandbox[];
   /**
    * An `AbortSignal` that cancels the interactive session when aborted.
    *
@@ -138,6 +144,8 @@ export interface WorktreeRunOptions {
   readonly hooks?: SandboxHooks;
   /** Environment variables to inject into the sandbox. */
   readonly env?: Record<string, string>;
+  /** Files to copy from the host into the sandbox home before sandbox hooks run. */
+  readonly copyFilesToSandbox?: readonly CopyFileToSandbox[];
   /** Resume a prior Claude Code session by ID. The session JSONL must exist on the host. Incompatible with maxIterations > 1. */
   readonly resumeSession?: string;
   /**
@@ -174,6 +182,8 @@ export interface WorktreeCreateSandboxOptions {
   readonly hooks?: SandboxHooks;
   /** Paths relative to the host repo root to copy into the worktree at creation time. */
   readonly copyToWorktree?: string[];
+  /** Files to copy from the host into the sandbox home before sandbox hooks run. */
+  readonly copyFilesToSandbox?: readonly CopyFileToSandbox[];
   /** Override default timeouts for built-in lifecycle steps. Unset keys keep their defaults. */
   readonly timeouts?: Timeouts;
   /** @internal Test-only overrides to bypass the sandbox provider. */
@@ -231,7 +241,12 @@ export const createWorktree = async (
       baseBranch,
     });
     if (options.copyToWorktree && options.copyToWorktree.length > 0) {
-      yield* copyToWorktree(options.copyToWorktree, hostRepoDir, info.path, options.timeouts?.copyToWorktreeMs);
+      yield* copyToWorktree(
+        options.copyToWorktree,
+        hostRepoDir,
+        info.path,
+        options.timeouts?.copyToWorktreeMs,
+      );
     }
     // Run host.onWorktreeReady hooks after copyToWorktree, before sandbox creation
     if (options.hooks?.host?.onWorktreeReady?.length) {
@@ -271,6 +286,10 @@ export const createWorktree = async (
 
     const { prompt, promptFile, hooks, agent: provider } = opts;
     const resolvedSandbox = opts.sandbox ?? noSandbox();
+    const resolvedCopyFilesToSandbox = resolveCopyFilesToSandbox(
+      opts.copyFilesToSandbox,
+      resolvedSandbox,
+    );
 
     // Validate buildInteractiveArgs is available
     if (!provider.buildInteractiveArgs) {
@@ -361,6 +380,7 @@ export const createWorktree = async (
             worktreeOrRepoPath: worktreeInfo.path,
             gitMounts,
             repoDir: SANDBOX_REPO_DIR,
+            copyFilesToSandbox: resolvedCopyFilesToSandbox,
           }),
         );
         handle = startResult.handle;
@@ -472,6 +492,10 @@ export const createWorktree = async (
 
     const { prompt, promptFile, hooks, agent: provider } = opts;
     const sandboxProvider = opts.sandbox;
+    const resolvedCopyFilesToSandbox = resolveCopyFilesToSandbox(
+      opts.copyFilesToSandbox,
+      sandboxProvider,
+    );
     const maxIterations = opts.maxIterations ?? 1;
 
     if (opts.resumeSession && maxIterations > 1) {
@@ -549,6 +573,7 @@ export const createWorktree = async (
           worktreeOrRepoPath: worktreeInfo.path,
           gitMounts,
           repoDir: SANDBOX_REPO_DIR,
+          copyFilesToSandbox: resolvedCopyFilesToSandbox,
         });
         handle = startResult.handle;
         sandboxRepoDir = startResult.worktreePath;
@@ -675,6 +700,7 @@ export const createWorktree = async (
       sandbox: opts.sandbox,
       hooks: opts.hooks,
       copyToWorktree: opts.copyToWorktree,
+      copyFilesToSandbox: opts.copyFilesToSandbox,
       timeouts: opts.timeouts,
       _test: opts._test,
     });

@@ -26,6 +26,10 @@ import type {
 import { resolveEnv } from "./EnvResolver.js";
 import { mergeProviderEnv } from "./mergeProviderEnv.js";
 import { copyToWorktree } from "./CopyToWorktree.js";
+import {
+  type CopyFileToSandbox,
+  resolveCopyFilesToSandbox,
+} from "./CopyFilesToSandbox.js";
 import { startSandbox } from "./startSandbox.js";
 import { syncOut } from "./syncOut.js";
 import * as WorktreeManager from "./WorktreeManager.js";
@@ -61,6 +65,8 @@ export interface InteractiveOptions {
   readonly hooks?: SandboxHooks;
   /** Paths relative to the host repo root to copy into the worktree before sandbox start. */
   readonly copyToWorktree?: string[];
+  /** Files to copy from the host into the sandbox home before sandbox hooks run. */
+  readonly copyFilesToSandbox?: readonly CopyFileToSandbox[];
   /** Key-value map for {{KEY}} placeholder substitution in prompts */
   readonly promptArgs?: PromptArgs;
   /** Environment variables to inject into the sandbox. */
@@ -158,6 +164,10 @@ export const interactive = async (
 
   const isHeadMode = branchStrategy.type === "head";
   const sandboxProvider = resolvedSandbox;
+  const resolvedCopyFilesToSandbox = resolveCopyFilesToSandbox(
+    options.copyFilesToSandbox,
+    sandboxProvider,
+  );
 
   const inner = Effect.gen(function* () {
     const hostRepoDir = yield* resolveCwd(options.cwd);
@@ -321,6 +331,7 @@ export const interactive = async (
           worktreeOrRepoPath: isHeadMode ? hostRepoDir : worktreeInfo!.path,
           gitMounts,
           repoDir: SANDBOX_REPO_DIR,
+          copyFilesToSandbox: resolvedCopyFilesToSandbox,
         }),
       );
       handle = startResult.handle;

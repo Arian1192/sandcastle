@@ -48,6 +48,10 @@ import { startSandbox } from "./startSandbox.js";
 import { syncOut } from "./syncOut.js";
 import * as WorktreeManager from "./WorktreeManager.js";
 import { copyToWorktree } from "./CopyToWorktree.js";
+import {
+  type CopyFileToSandbox,
+  resolveCopyFilesToSandbox,
+} from "./CopyFilesToSandbox.js";
 import { resolveCwd } from "./resolveCwd.js";
 
 export interface CreateSandboxOptions {
@@ -73,6 +77,8 @@ export interface CreateSandboxOptions {
   readonly hooks?: SandboxHooks;
   /** Paths relative to the host repo root to copy into the worktree at creation time. */
   readonly copyToWorktree?: string[];
+  /** Files to copy from the host into the sandbox home before sandbox hooks run. */
+  readonly copyFilesToSandbox?: readonly CopyFileToSandbox[];
   /** Override default timeouts for built-in lifecycle steps. Unset keys keep their defaults. */
   readonly timeouts?: Timeouts;
   /** @internal Test-only overrides to bypass the sandbox provider. */
@@ -501,6 +507,7 @@ export interface CreateSandboxFromWorktreeOptions {
   readonly sandbox: SandboxProvider;
   readonly hooks?: SandboxHooks;
   readonly copyToWorktree?: string[];
+  readonly copyFilesToSandbox?: readonly CopyFileToSandbox[];
   readonly timeouts?: Timeouts;
   readonly _test?: {
     readonly buildSandboxLayer?: (
@@ -519,6 +526,10 @@ export const createSandboxFromWorktree = async (
 ): Promise<Sandbox> => {
   const { branch, worktreePath, hostRepoDir } = options;
   const isTestMode = !!options._test?.buildSandboxLayer;
+  const resolvedCopyFilesToSandbox = resolveCopyFilesToSandbox(
+    options.copyFilesToSandbox,
+    options.sandbox,
+  );
 
   // 1. Copy files if requested (bind-mount only)
   if (
@@ -527,7 +538,12 @@ export const createSandboxFromWorktree = async (
     options.sandbox.tag !== "isolated"
   ) {
     await Effect.runPromise(
-      copyToWorktree(options.copyToWorktree, hostRepoDir, worktreePath, options.timeouts?.copyToWorktreeMs),
+      copyToWorktree(
+        options.copyToWorktree,
+        hostRepoDir,
+        worktreePath,
+        options.timeouts?.copyToWorktreeMs,
+      ),
     );
   }
 
@@ -575,6 +591,7 @@ export const createSandboxFromWorktree = async (
             worktreeOrRepoPath: worktreePath,
             gitMounts,
             repoDir: SANDBOX_REPO_DIR,
+            copyFilesToSandbox: resolvedCopyFilesToSandbox,
           }),
         ),
       );
@@ -656,6 +673,10 @@ export const createSandbox = async (
 ): Promise<Sandbox> => {
   const { branch } = options;
   const isTestMode = !!options._test?.buildSandboxLayer;
+  const resolvedCopyFilesToSandbox = resolveCopyFilesToSandbox(
+    options.copyFilesToSandbox,
+    options.sandbox,
+  );
 
   // 1. Resolve cwd, prune stale worktrees + create worktree on the explicit branch
   const { hostRepoDir, worktreeInfo } = await Effect.runPromise(
@@ -681,7 +702,12 @@ export const createSandbox = async (
     options.sandbox.tag !== "isolated"
   ) {
     await Effect.runPromise(
-      copyToWorktree(options.copyToWorktree, hostRepoDir, worktreePath, options.timeouts?.copyToWorktreeMs),
+      copyToWorktree(
+        options.copyToWorktree,
+        hostRepoDir,
+        worktreePath,
+        options.timeouts?.copyToWorktreeMs,
+      ),
     );
   }
 
@@ -737,6 +763,7 @@ export const createSandbox = async (
             worktreeOrRepoPath: worktreePath,
             gitMounts,
             repoDir: SANDBOX_REPO_DIR,
+            copyFilesToSandbox: resolvedCopyFilesToSandbox,
           }),
         ),
       );

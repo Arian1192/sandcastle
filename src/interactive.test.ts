@@ -1,6 +1,12 @@
 import { execSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import {
+  mkdtempSync,
+  writeFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { interactive, type InteractiveOptions } from "./interactive.js";
@@ -587,6 +593,69 @@ describe("interactive()", () => {
     });
 
     expect(executionOrder).toEqual(["interactive-after-hook"]);
+  });
+
+  it("copies files to sandbox before onSandboxReady hooks", async () => {
+    const sandboxHome = mkdtempSync(join(tmpdir(), "sandcastle-copy-home-"));
+    const hostAuthFile = join(hostDir, "auth.json");
+    writeFileSync(hostAuthFile, "secret");
+
+    let hookSawCopiedFile = false;
+
+    const provider = createBindMountSandboxProvider({
+      name: "test-interactive-copy-files",
+      sandboxHomedir: sandboxHome,
+      create: async (options) => {
+        const handle: BindMountSandboxHandle = {
+          worktreePath: options.worktreePath,
+          exec: async (command, execOptions) => {
+            const stdout = execSync(command, {
+              cwd: execOptions?.cwd ?? options.worktreePath,
+              encoding: "utf-8",
+              stdio: ["pipe", "pipe", "pipe"],
+            });
+            return { stdout, stderr: "", exitCode: 0 };
+          },
+          interactiveExec: async (_args, opts) => {
+            hookSawCopiedFile = existsSync(
+              join(opts.cwd!, "hook-saw-auth.txt"),
+            );
+            return { exitCode: 0 };
+          },
+          copyFileIn: async (from, to) => {
+            mkdirSync(dirname(to), { recursive: true });
+            writeFileSync(to, readFileSync(from));
+          },
+          copyFileOut: async () => {},
+          close: async () => {},
+        };
+        return handle;
+      },
+    });
+
+    await interactive({
+      agent: claudeCode("claude-opus-4-6"),
+      sandbox: provider,
+      prompt: "test",
+      branchStrategy: { type: "head" },
+      copyFilesToSandbox: [
+        {
+          hostPath: hostAuthFile,
+          sandboxPath: "~/.codex/auth.json",
+        },
+      ],
+      hooks: {
+        sandbox: {
+          onSandboxReady: [
+            {
+              command: `test -f "${join(sandboxHome, ".codex", "auth.json")}" && touch hook-saw-auth.txt`,
+            },
+          ],
+        },
+      },
+    });
+
+    expect(hookSawCopiedFile).toBe(true);
   });
 
   // --- copyToWorktree tests ---

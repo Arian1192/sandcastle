@@ -24,6 +24,10 @@ import {
   SANDBOX_REPO_DIR,
 } from "./SandboxFactory.js";
 import { syncIn } from "./syncIn.js";
+import {
+  copyFilesToSandbox,
+  type ResolvedCopyFileToSandbox,
+} from "./CopyFilesToSandbox.js";
 import { normalizeMounts } from "./mountUtils.js";
 
 export interface StartSandboxBindMountOptions {
@@ -34,6 +38,7 @@ export interface StartSandboxBindMountOptions {
   gitMounts: MountEntry[];
   repoDir: string;
   copyPaths?: undefined;
+  copyFilesToSandbox?: readonly ResolvedCopyFileToSandbox[];
 }
 
 export interface StartSandboxIsolatedOptions {
@@ -44,6 +49,7 @@ export interface StartSandboxIsolatedOptions {
   gitMounts?: undefined;
   repoDir?: undefined;
   copyPaths?: string[];
+  copyFilesToSandbox?: undefined;
 }
 
 export type StartSandboxOptions =
@@ -122,6 +128,23 @@ const startBindMountSandbox = (
         message: `Provider '${options.provider.name}' create failed: ${e instanceof Error ? e.message : String(e)}`,
       }),
   }).pipe(
+    Effect.flatMap((handle) =>
+      Effect.tryPromise({
+        try: async () => {
+          if (
+            options.copyFilesToSandbox &&
+            options.copyFilesToSandbox.length > 0
+          ) {
+            await copyFilesToSandbox(handle, options.copyFilesToSandbox);
+          }
+          return handle;
+        },
+        catch: (e) =>
+          new WorktreeError({
+            message: `Failed to copy files to sandbox: ${e instanceof Error ? e.message : String(e)}`,
+          }),
+      }),
+    ),
     Effect.map((handle) => ({
       handle,
       sandboxLayer: makeSandboxLayerFromHandle(handle),
