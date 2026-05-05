@@ -104,7 +104,9 @@ RUN apt-get update && apt-get install -y \\
 RUN usermod -d /home/agent -m -l agent node
 
 # Install pi coding agent (run as root before USER agent)
-RUN npm install -g @mariozechner/pi-coding-agent
+# Pin 0.73.0 because 0.72.1 can keep openai-codex print/json processes
+# alive after the final response inside the sandbox.
+RUN npm install -g @mariozechner/pi-coding-agent@0.73.0
 
 USER agent
 
