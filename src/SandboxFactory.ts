@@ -15,6 +15,7 @@ import {
 import type { Timeouts } from "./run.js";
 import * as WorktreeManager from "./WorktreeManager.js";
 import { copyToWorktree } from "./CopyToWorktree.js";
+import type { ResolvedCopyFileToSandbox } from "./CopyFilesToSandbox.js";
 import { Display } from "./Display.js";
 import type {
   SandboxProvider,
@@ -177,6 +178,8 @@ export class SandboxConfig extends Context.Tag("SandboxConfig")<
     readonly hostRepoDir: string;
     /** Paths relative to the host repo root to copy into the worktree before sandbox start. */
     readonly copyToWorktree?: string[];
+    /** Files to copy from the host into the sandbox home before sandbox hooks run. */
+    readonly copyFilesToSandbox?: readonly ResolvedCopyFileToSandbox[];
     /** When specified, the run name is included in the auto-generated branch and worktree names. */
     readonly name?: string;
     /** Sandbox provider — delegates sandbox lifecycle to the provider. */
@@ -311,6 +314,7 @@ export const WorktreeDockerSandboxFactory = {
         env,
         hostRepoDir,
         copyToWorktree: copyPaths,
+        copyFilesToSandbox,
         name,
         sandboxProvider,
         branchStrategy,
@@ -464,6 +468,7 @@ export const WorktreeDockerSandboxFactory = {
                     worktreeOrRepoPath: hostRepoDir,
                     gitMounts,
                     repoDir: SANDBOX_REPO_DIR,
+                    copyFilesToSandbox,
                   }),
                   // Use
                   ({ sandboxLayer, worktreePath, handle }) =>
@@ -504,7 +509,12 @@ export const WorktreeDockerSandboxFactory = {
                 (copyPaths && copyPaths.length > 0
                   ? display.spinner(
                       "Copying to worktree",
-                      copyToWorktree(copyPaths, hostRepoDir, worktreeInfo.path, timeouts?.copyToWorktreeMs),
+                      copyToWorktree(
+                        copyPaths,
+                        hostRepoDir,
+                        worktreeInfo.path,
+                        timeouts?.copyToWorktreeMs,
+                      ),
                     )
                   : Effect.succeed(undefined)
                 ).pipe(Effect.map(() => worktreeInfo)),
@@ -556,6 +566,7 @@ export const WorktreeDockerSandboxFactory = {
                         worktreeOrRepoPath: worktreeInfo.path,
                         gitMounts,
                         repoDir: SANDBOX_REPO_DIR,
+                        copyFilesToSandbox,
                       }).pipe(
                         Effect.map(
                           ({ handle, sandboxLayer, worktreePath }) => ({

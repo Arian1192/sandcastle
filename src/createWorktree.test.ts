@@ -1,8 +1,8 @@
 import { exec, execSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import { createWorktree } from "./createWorktree.js";
@@ -983,6 +983,70 @@ describe("worktree.createSandbox()", () => {
     } finally {
       await ws.close();
       await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("copies files to sandbox before onSandboxReady hooks", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-sandbox-copy-"));
+    const sandboxHome = await mkdtemp(join(tmpdir(), "ws-sandbox-home-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await writeFile(join(hostDir, "auth.json"), "secret");
+
+    const sandboxProvider = createBindMountSandboxProvider({
+      name: "copy-files-sandbox",
+      sandboxHomedir: sandboxHome,
+      create: async (options) =>
+        ({
+          worktreePath: options.worktreePath,
+          exec: async (command, execOptions) => {
+            const stdout = execSync(command, {
+              cwd: execOptions?.cwd ?? options.worktreePath,
+              encoding: "utf-8",
+              stdio: ["pipe", "pipe", "pipe"],
+            });
+            return { stdout, stderr: "", exitCode: 0 } satisfies ExecResult;
+          },
+          copyFileIn: async (from, to) => {
+            await mkdir(dirname(to), { recursive: true });
+            await writeFile(to, await readFile(from));
+          },
+          copyFileOut: async () => {},
+          close: async () => {},
+        }) satisfies BindMountSandboxHandle,
+    });
+
+    const ws = await createWorktree({
+      branchStrategy: { type: "branch", branch: "sandbox-copy-hook" },
+      cwd: hostDir,
+    });
+
+    try {
+      const sandbox = await ws.createSandbox({
+        sandbox: sandboxProvider,
+        copyFilesToSandbox: [
+          {
+            hostPath: join(hostDir, "auth.json"),
+            sandboxPath: "~/.codex/auth.json",
+          },
+        ],
+        hooks: {
+          sandbox: {
+            onSandboxReady: [
+              {
+                command: `test -f "${join(sandboxHome, ".codex", "auth.json")}" && touch hook-saw-auth.txt`,
+              },
+            ],
+          },
+        },
+      });
+
+      expect(existsSync(join(ws.worktreePath, "hook-saw-auth.txt"))).toBe(true);
+      await sandbox.close();
+    } finally {
+      await ws.close();
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(sandboxHome, { recursive: true, force: true });
     }
   });
 
