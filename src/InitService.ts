@@ -21,7 +21,7 @@ const TEMPLATES: TemplateMetadata[] = [
   },
   {
     name: "simple-loop",
-    description: "Picks GitHub issues one by one and closes them",
+    description: "Picks issues one by one and closes them",
   },
   {
     name: "sequential-reviewer",
@@ -67,11 +67,15 @@ RUN apt-get update && apt-get install -y \\
 
 {{BACKLOG_MANAGER_TOOLS}}
 
-# Rename the base image's "node" user (UID 1000) to "agent".
-# This keeps UID 1000 so that --userns=keep-id (Podman) and
-# --user 1000:1000 (Docker) map to the correct home directory owner.
-RUN usermod -d /home/agent -m -l agent node
-USER agent
+# Build-args for UID/GID alignment: sandcastle docker build-image
+# defaults these to the host user's UID/GID so image-built files
+# and bind-mounted files share an owner without runtime chown.
+ARG AGENT_UID=1000
+ARG AGENT_GID=1000
+
+# Rename the base image's "node" user to "agent" and align UID/GID.
+RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+USER \${AGENT_UID}:\${AGENT_GID}
 
 # Install Claude Code CLI
 RUN curl -fsSL https://claude.ai/install.sh | bash
@@ -98,17 +102,21 @@ RUN apt-get update && apt-get install -y \\
 
 {{BACKLOG_MANAGER_TOOLS}}
 
-# Rename the base image's "node" user (UID 1000) to "agent".
-# This keeps UID 1000 so that --userns=keep-id (Podman) and
-# --user 1000:1000 (Docker) map to the correct home directory owner.
-RUN usermod -d /home/agent -m -l agent node
+# Build-args for UID/GID alignment: sandcastle docker build-image
+# defaults these to the host user's UID/GID so image-built files
+# and bind-mounted files share an owner without runtime chown.
+ARG AGENT_UID=1000
+ARG AGENT_GID=1000
+
+# Rename the base image's "node" user to "agent" and align UID/GID.
+RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
 
 # Install pi coding agent (run as root before USER agent)
 # Pin 0.73.0 because 0.72.1 can keep openai-codex print/json processes
 # alive after the final response inside the sandbox.
 RUN npm install -g @mariozechner/pi-coding-agent@0.73.0
 
-USER agent
+USER \${AGENT_UID}:\${AGENT_GID}
 
 WORKDIR /home/agent
 
@@ -129,15 +137,19 @@ RUN apt-get update && apt-get install -y \\
 
 {{BACKLOG_MANAGER_TOOLS}}
 
-# Rename the base image's "node" user (UID 1000) to "agent".
-# This keeps UID 1000 so that --userns=keep-id (Podman) and
-# --user 1000:1000 (Docker) map to the correct home directory owner.
-RUN usermod -d /home/agent -m -l agent node
+# Build-args for UID/GID alignment: sandcastle docker build-image
+# defaults these to the host user's UID/GID so image-built files
+# and bind-mounted files share an owner without runtime chown.
+ARG AGENT_UID=1000
+ARG AGENT_GID=1000
+
+# Rename the base image's "node" user to "agent" and align UID/GID.
+RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
 
 # Install Codex CLI (run as root before USER agent)
 RUN npm install -g @openai/codex
 
-USER agent
+USER \${AGENT_UID}:\${AGENT_GID}
 
 WORKDIR /home/agent
 
@@ -158,15 +170,19 @@ RUN apt-get update && apt-get install -y \\
 
 {{BACKLOG_MANAGER_TOOLS}}
 
-# Rename the base image's "node" user (UID 1000) to "agent".
-# This keeps UID 1000 so that --userns=keep-id (Podman) and
-# --user 1000:1000 (Docker) map to the correct home directory owner.
-RUN usermod -d /home/agent -m -l agent node
+# Build-args for UID/GID alignment: sandcastle docker build-image
+# defaults these to the host user's UID/GID so image-built files
+# and bind-mounted files share an owner without runtime chown.
+ARG AGENT_UID=1000
+ARG AGENT_GID=1000
+
+# Rename the base image's "node" user to "agent" and align UID/GID.
+RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
 
 # Install OpenCode CLI (run as root before USER agent)
 RUN npm install -g opencode-ai@latest
 
-USER agent
+USER \${AGENT_UID}:\${AGENT_GID}
 
 WORKDIR /home/agent
 

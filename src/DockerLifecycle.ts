@@ -35,25 +35,44 @@ const dockerExec = (args: string[]): Effect.Effect<string, DockerError> =>
 export const buildImage = (
   imageName: string,
   dockerfileDir: string,
-  options?: { readonly dockerfile?: string },
+  options?: {
+    readonly dockerfile?: string;
+    readonly buildArgs?: Record<string, string>;
+  },
 ): Effect.Effect<void, DockerError> =>
   Effect.gen(function* () {
+    const buildArgFlags = Object.entries(options?.buildArgs ?? {}).flatMap(
+      ([k, v]) => ["--build-arg", `${k}=${v}`],
+    );
     if (options?.dockerfile) {
       yield* dockerExec([
         "build",
         "-t",
         imageName,
+        ...buildArgFlags,
         "-f",
         resolve(options.dockerfile),
         process.cwd(),
       ]);
     } else {
-      yield* dockerExec(["build", "-t", imageName, resolve(dockerfileDir)]);
+      yield* dockerExec([
+        "build",
+        "-t",
+        imageName,
+        ...buildArgFlags,
+        resolve(dockerfileDir),
+      ]);
     }
   });
 
+export interface VolumeMount {
+  readonly hostPath: string;
+  readonly sandboxPath: string;
+  readonly readonly?: boolean;
+}
+
 export interface StartContainerOptions {
-  readonly volumeMounts?: readonly string[];
+  readonly volumeMounts?: readonly VolumeMount[];
   readonly workdir?: string;
   /** Run the container as this uid:gid instead of the Dockerfile's USER. */
   readonly user?: string;
@@ -95,8 +114,8 @@ export const startContainer = (
     ]);
 
     const volumeFlags = (options?.volumeMounts ?? []).flatMap((mount) => [
-      "-v",
-      mount,
+      "--mount",
+      `type=bind,source=${mount.hostPath},target=${mount.sandboxPath}${mount.readonly ? ",readonly" : ""}`,
     ]);
 
     const workdirFlags = options?.workdir ? ["-w", options.workdir] : [];

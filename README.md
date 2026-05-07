@@ -135,6 +135,10 @@ const result = await run({
   // Provider-specific config (like imageName, mounts) lives inside the provider factory call.
   sandbox: docker({
     imageName: "sandcastle:local",
+    // Optional: override the UID/GID used for --user flag (defaults to host UID/GID).
+    // Must match the UID baked into the image. Pre-flight check catches mismatches.
+    // containerUid: 1000,
+    // containerGid: 1000,
     // Optional: mount host directories into the sandbox (e.g. package manager caches)
     // hostPath supports absolute, tilde-expanded (~), and relative paths (resolved from cwd).
     // sandboxPath supports absolute and relative paths (resolved from the sandbox repo directory).
@@ -223,6 +227,11 @@ const result = await run({
 
   // Idle timeout in seconds — resets whenever the agent produces output. Default: 600 (10 minutes)
   idleTimeoutSeconds: 600,
+
+  // Structured output — extract a typed payload from the agent's stdout.
+  // Requires maxIterations === 1 and the tag must appear in the prompt.
+  // output: Output.object({ tag: "result", schema: z.object({ answer: z.number() }) }),
+  // output: Output.string({ tag: "summary" }),
 });
 
 console.log(result.iterations.length); // number of iterations executed
@@ -599,6 +608,34 @@ await run({
 
 Tell the agent to output your chosen string(s) in the prompt, and the orchestrator will stop when it detects any of them. The matched signal is returned as `result.completionSignal`.
 
+### Structured output
+
+Use `Output.object()` to extract a typed, schema-validated JSON payload from the agent's stdout. The agent emits its answer inside an XML tag you specify, and Sandcastle parses, validates, and returns it on `result.output`. See [ADR 0010](docs/adr/0010-structured-output.md) for design rationale.
+
+```ts
+import { run, Output, claudeCode } from "@ai-hero/sandcastle";
+import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { z } from "zod";
+
+const result = await run({
+  agent: claudeCode("claude-opus-4-6"),
+  sandbox: docker(),
+  prompt: `Analyze the code, and output the result as JSON inside <result> tags.
+    The result must match this schema:
+    { summary: string; score: string }
+  `,
+  output: Output.object({
+    tag: "result",
+    schema: z.object({ summary: z.string(), score: z.number() }),
+  }),
+});
+
+console.log(result.output.summary); // typed as string
+console.log(result.output.score); // typed as number
+```
+
+`Output.string({ tag })` extracts the tag contents as a plain string (trimmed, no JSON parsing). Both helpers require `maxIterations` to be `1` (the default). The resolved prompt must contain the configured opening tag literal.
+
 ### Templates
 
 `sandcastle init` prompts you to choose a sandbox provider (Docker or Podman), a backlog manager (GitHub Issues or Beads), and a template, which scaffolds a ready-to-use prompt and `main.mts` suited to a specific workflow. If your project's `package.json` has `"type": "module"`, the file will be named `main.ts` instead. Five templates are available:
@@ -606,7 +643,7 @@ Tell the agent to output your chosen string(s) in the prompt, and the orchestrat
 | Template                       | Description                                                               |
 | ------------------------------ | ------------------------------------------------------------------------- |
 | `blank`                        | Bare scaffold — write your own prompt and orchestration                   |
-| `simple-loop`                  | Picks GitHub issues one by one and closes them                            |
+| `simple-loop`                  | Picks issues one by one and closes them                                   |
 | `sequential-reviewer`          | Implements issues one by one, with a code review step after each          |
 | `parallel-planner`             | Plans parallelizable issues, executes on separate branches, then merges   |
 | `parallel-planner-with-review` | Plans parallelizable issues, executes with per-branch review, then merges |
@@ -640,7 +677,7 @@ Errors if `.sandcastle/` already exists to prevent overwriting customizations.
 
 ### `sandcastle docker build-image`
 
-Rebuilds the Docker image from an existing `.sandcastle/` directory. Use this after modifying the Dockerfile.
+Rebuilds the Docker image from an existing `.sandcastle/` directory. Use this after modifying the Dockerfile. On Linux/macOS, the build automatically passes `--build-arg AGENT_UID=$(id -u)` and `AGENT_GID=$(id -g)` so the image's `agent` user matches the host UID — this prevents permission errors on image-built files without runtime chown.
 
 | Option         | Required | Default                      | Description                                                                       |
 | -------------- | -------- | ---------------------------- | --------------------------------------------------------------------------------- |
@@ -694,6 +731,7 @@ Removes the Podman image.
 | `resumeSession`      | string                | —                             | Resume a prior Claude Code session by ID. Incompatible with `maxIterations > 1`. Session file must exist on host.                                                                          |
 | `signal`             | AbortSignal           | —                             | Cancel the run when aborted. Kills the in-flight agent subprocess and cancels lifecycle hooks; the worktree is preserved on disk. Rejects with `signal.reason`.                            |
 | `timeouts`           | Timeouts              | —                             | Override default timeouts for built-in lifecycle steps. Currently supports `{ copyToWorktreeMs?: number }` (default: 60 000).                                                              |
+| `output`             | OutputDefinition      | —                             | Structured output definition (`Output.object(…)` or `Output.string(…)`). Requires `maxIterations === 1`. See [Structured output](#structured-output).                                      |
 
 ### `RunResult`
 
@@ -705,6 +743,7 @@ Removes the Podman image.
 | `commits`          | `{ sha }[]`         | Commits created during the run                                     |
 | `branch`           | string              | Target branch name                                                 |
 | `logFilePath`      | string?             | Path to the log file (only when logging to a file)                 |
+| `output`           | T?                  | Typed structured output (only present when `output` option is set) |
 
 ### `IterationResult`
 

@@ -31,6 +31,19 @@ export interface DockerOptions {
   /** Docker image name (default: derived from repo directory name). */
   readonly imageName?: string;
   /**
+   * The UID of the `agent` user inside the container image (default: host UID via `process.getuid()`, or 1000).
+   *
+   * Must match the UID baked into the image at build time. Used as the `--user` flag value
+   * and checked against the image's configured UID in the pre-flight diagnostic.
+   */
+  readonly containerUid?: number;
+  /**
+   * The GID of the `agent` user inside the container image (default: host GID via `process.getgid()`, or 1000).
+   *
+   * Must match the GID baked into the image at build time. Used as the `--user` flag value.
+   */
+  readonly containerGid?: number;
+  /**
    * Additional host directories to bind-mount into the sandbox.
    *
    * Each entry specifies a `hostPath` (tilde-expanded) and `sandboxPath`.
@@ -77,19 +90,23 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
           (m) => m.hostPath === createOptions.worktreePath,
         )?.sandboxPath ?? "/home/agent/workspace";
 
-      // Build volume mount strings (internal mounts + user-provided mounts)
+      // Build volume mount list (internal mounts + user-provided mounts)
       const allMounts = [...createOptions.mounts, ...userMounts];
-      const volumeMounts = allMounts.map((m) => {
-        const base = `${m.hostPath}:${m.sandboxPath}`;
-        return m.readonly ? `${base}:ro` : base;
-      });
+      const volumeMounts = allMounts.map((m) => ({
+        hostPath: m.hostPath,
+        sandboxPath: m.sandboxPath,
+        readonly: m.readonly,
+      }));
 
       // Resolve image name
       const imageName =
         configuredImageName ?? defaultImageName(createOptions.hostRepoPath);
 
-      const hostUid = process.getuid?.() ?? 1000;
-      const hostGid = process.getgid?.() ?? 1000;
+      const containerUid = options?.containerUid ?? process.getuid?.() ?? 1000;
+      const containerGid = options?.containerGid ?? process.getgid?.() ?? 1000;
+
+      // Pre-flight: verify image exists and UID matches
+      await checkImageUid(imageName, containerUid);
 
       // Start container
       await Effect.runPromise(
@@ -103,7 +120,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
           {
             volumeMounts,
             workdir: worktreePath,
-            user: `${hostUid}:${hostGid}`,
+            user: `${containerUid}:${containerGid}`,
             network: options?.network,
           },
         ),
@@ -270,3 +287,46 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
 
 // Re-export for backwards compatibility
 export { defaultImageName };
+
+const checkImageUid = (imageName: string, expectedUid: number): Promise<void> =>
+  new Promise<void>((resolve, reject) => {
+    execFile(
+      "docker",
+      ["image", "inspect", imageName, "--format", "{{.Config.User}}"],
+      (error, stdout) => {
+        if (error) {
+          reject(
+            new Error(
+              `Image '${imageName}' not found locally. Build it first with 'sandcastle docker build-image'.`,
+            ),
+          );
+          return;
+        }
+        const imageUser = (stdout ?? "").toString().trim();
+        if (!imageUser) {
+          // No USER directive in image — skip check
+          resolve();
+          return;
+        }
+        const uidPart = imageUser.split(":")[0]!;
+        const imageUid = parseInt(uidPart, 10);
+        if (isNaN(imageUid)) {
+          // Non-numeric user (e.g. "agent") — can't compare, skip check
+          resolve();
+          return;
+        }
+        if (imageUid !== expectedUid) {
+          reject(
+            new Error(
+              `UID mismatch: image '${imageName}' was built with UID ${imageUid}, ` +
+                `but the expected UID is ${expectedUid}. ` +
+                `Rebuild the image with 'sandcastle docker build-image', ` +
+                `or pass containerUid: ${imageUid} to docker() to match the image.`,
+            ),
+          );
+        } else {
+          resolve();
+        }
+      },
+    );
+  });

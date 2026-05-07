@@ -434,7 +434,7 @@ describe("InitService scaffold", () => {
       expect(mainTs).toContain('"@ai-hero/sandcastle"');
     });
 
-    it("main.mts calls sandcastle.run() twice per iteration (implement + review)", async () => {
+    it("main.mts uses createSandbox so implementer and reviewer share a sandbox", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "sequential-reviewer" });
 
@@ -442,14 +442,14 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
       );
-      expect(mainTs).toContain("sandcastle");
-      const runCallCount = (mainTs.match(/\.run\(/g) ?? []).length;
-      expect(runCallCount).toBeGreaterThanOrEqual(2);
+      expect(mainTs).toContain("createSandbox");
+      expect(mainTs).toContain("sandbox.run");
+      expect(mainTs).toContain("sandbox.close");
       expect(mainTs).toContain("implement-prompt.md");
       expect(mainTs).toContain("review-prompt.md");
     });
 
-    it("main.mts passes branch from implement result to review run", async () => {
+    it("main.mts does not use merge-to-head (incompatible with reviewer handoff)", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "sequential-reviewer" });
 
@@ -457,7 +457,18 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
       );
-      expect(mainTs).toContain("branch");
+      expect(mainTs).not.toContain("merge-to-head");
+    });
+
+    it("main.mts only reviews when implementer produces commits", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "sequential-reviewer" });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain("implement.commits.length");
     });
 
     it("implement-prompt.md contains issue selection and closure, not prompt argument placeholders", async () => {
@@ -1227,7 +1238,8 @@ describe("InitService scaffold", () => {
       );
       expect(prompt).toContain("bd ready --json");
       expect(prompt).toContain("bd close");
-      expect(prompt).not.toContain("gh issue");
+      expect(prompt).not.toContain("gh issue list");
+      expect(prompt).not.toContain("gh issue close");
       expect(prompt).not.toContain("{{LIST_TASKS_COMMAND}}");
       expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
     });
@@ -1290,6 +1302,17 @@ describe("InitService scaffold", () => {
       expect(prompt).not.toContain("{{LIST_TASKS_COMMAND}}");
     });
 
+    it("simple-loop prompt uses backlog-agnostic language", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "simple-loop" });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).not.toContain("GitHub issue");
+    });
+
     // --- sequential-reviewer ---
 
     it("sequential-reviewer with github-issues produces implement-prompt with gh issue commands", async () => {
@@ -1324,9 +1347,21 @@ describe("InitService scaffold", () => {
       );
       expect(prompt).toContain("bd ready --json");
       expect(prompt).toContain("bd close");
-      expect(prompt).not.toContain("gh issue");
+      expect(prompt).not.toContain("gh issue list");
+      expect(prompt).not.toContain("gh issue close");
       expect(prompt).not.toContain("{{LIST_TASKS_COMMAND}}");
       expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
+    });
+
+    it("sequential-reviewer implement-prompt uses backlog-agnostic language", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "sequential-reviewer" });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "implement-prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).not.toContain("GitHub issue");
     });
 
     // --- blank ---

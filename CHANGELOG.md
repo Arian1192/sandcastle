@@ -1,5 +1,12 @@
 # @ai-hero/sandcastle
 
+## 0.5.8
+
+### Patch Changes
+
+- 7400ead: Add a short hint to the `parallel-planner` and `parallel-planner-with-review` plan prompts noting that the issues list is already filtered, so the planner agent is less likely to requery and pick up issues outside the configured filter.
+- 21b6442: Fix Windows hosts emitting backslash separators for in-container paths during session capture/resume and `copyPaths`. `sandboxSessionStore`, `defaultSessionPathsLayer`, and `startSandbox`'s `copyPaths` now use POSIX joins for paths that target the Linux container, so `docker cp` / `podman cp` no longer reject them on Windows.
+
 ## 0.5.7
 
 ### Patch Changes

@@ -126,6 +126,176 @@ describe("docker()", () => {
     expect(provider.tag).toBe("bind-mount");
   });
 
+  it("runs pre-flight docker image inspect before docker run", async () => {
+    const callOrder: string[] = [];
+    mockExecFile.mockImplementation((_command, args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      if (Array.isArray(args) && args[0] === "image" && args[1] === "inspect") {
+        callOrder.push("inspect");
+        const hostUid = process.getuid?.() ?? 1000;
+        const hostGid = process.getgid?.() ?? 1000;
+        callback(null, `${hostUid}:${hostGid}\n`, "");
+      } else if (Array.isArray(args) && args[0] === "run") {
+        callOrder.push("run");
+        callback(null, "", "");
+      } else {
+        callback(null, "", "");
+      }
+      return undefined as any;
+    });
+
+    const provider = docker();
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    expect(callOrder).toEqual(["inspect", "run"]);
+
+    await handle.close();
+  });
+
+  it("throws on UID mismatch between image and host", async () => {
+    mockExecFile.mockImplementation((_command, args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      if (Array.isArray(args) && args[0] === "image" && args[1] === "inspect") {
+        callback(null, "9999:9999\n", "");
+      } else {
+        callback(null, "", "");
+      }
+      return undefined as any;
+    });
+
+    const provider = docker();
+
+    await expect(
+      provider.create({
+        worktreePath: "/tmp/worktree",
+        hostRepoPath: "/tmp/repo",
+        mounts: [
+          { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+        ],
+        env: {},
+      }),
+    ).rejects.toThrow("UID mismatch");
+  });
+
+  it("containerUid override bypasses UID mismatch with host", async () => {
+    mockExecFile.mockImplementation((_command, args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      if (Array.isArray(args) && args[0] === "image" && args[1] === "inspect") {
+        // Image has UID 500, which differs from host but matches containerUid
+        callback(null, "500:500\n", "");
+      } else {
+        callback(null, "", "");
+      }
+      return undefined as any;
+    });
+
+    const provider = docker({ containerUid: 500, containerGid: 500 });
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    // Should succeed — containerUid matches image UID
+    const runCall = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    );
+    expect(runCall).toBeDefined();
+
+    await handle.close();
+  });
+
+  it("throws a clear error when image is not found locally", async () => {
+    mockExecFile.mockImplementationOnce((_command, _args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      callback(new Error("no such image"), "", "");
+      return undefined as any;
+    });
+
+    const provider = docker({ imageName: "my-app:latest" });
+
+    await expect(
+      provider.create({
+        worktreePath: "/tmp/worktree",
+        hostRepoPath: "/tmp/repo",
+        mounts: [
+          { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+        ],
+        env: {},
+      }),
+    ).rejects.toThrow(
+      "Image 'my-app:latest' not found locally. Build it first with 'sandcastle docker build-image'.",
+    );
+  });
+
+  it("uses host UID/GID by default for --user flag", async () => {
+    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      callback(null, "", "");
+      return undefined as any;
+    });
+
+    const provider = docker();
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    const runCall = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    );
+    const runArgs = runCall![1] as string[];
+    const userIdx = runArgs.indexOf("--user");
+    expect(userIdx).toBeGreaterThan(-1);
+    const hostUid = process.getuid?.() ?? 1000;
+    const hostGid = process.getgid?.() ?? 1000;
+    expect(runArgs[userIdx + 1]).toBe(`${hostUid}:${hostGid}`);
+
+    await handle.close();
+  });
+
+  it("uses containerUid/containerGid for --user flag when provided", async () => {
+    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      callback(null, "", "");
+      return undefined as any;
+    });
+
+    const provider = docker({ containerUid: 500, containerGid: 500 });
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    const runCall = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    );
+    const runArgs = runCall![1] as string[];
+    const userIdx = runArgs.indexOf("--user");
+    expect(userIdx).toBeGreaterThan(-1);
+    expect(runArgs[userIdx + 1]).toBe("500:500");
+
+    await handle.close();
+  });
+
   it("copyFileIn calls docker cp with correct arguments", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
       const callback = rest[rest.length - 1];

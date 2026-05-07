@@ -53,6 +53,7 @@ import {
   resolveCopyFilesToSandbox,
 } from "./CopyFilesToSandbox.js";
 import { resolveCwd } from "./resolveCwd.js";
+import { patchGitMountsForWindows } from "./mountUtils.js";
 
 export interface CreateSandboxOptions {
   /** Explicit branch for the worktree (required). */
@@ -583,6 +584,21 @@ export const createSandboxFromWorktree = async (
       startEffect = resolveGitMounts(join(hostRepoDir, ".git")).pipe(
         Effect.provide(NodeFileSystem.layer),
         Effect.catchAll(() => Effect.succeed([])),
+        // Patch git mounts for Windows worktree compatibility (ADR-0006)
+        Effect.flatMap((gitMounts) =>
+          Effect.tryPromise({
+            try: () =>
+              patchGitMountsForWindows(
+                gitMounts,
+                worktreePath,
+                SANDBOX_REPO_DIR,
+              ),
+            catch: (e) =>
+              new Error(
+                `Failed to patch git mounts: ${e instanceof Error ? e.message : String(e)}`,
+              ),
+          }),
+        ),
         Effect.flatMap((gitMounts) =>
           startSandbox({
             provider,
@@ -755,6 +771,21 @@ export const createSandbox = async (
       startEffect = resolveGitMounts(join(hostRepoDir, ".git")).pipe(
         Effect.provide(NodeFileSystem.layer),
         Effect.catchAll(() => Effect.succeed([])),
+        // Patch git mounts for Windows worktree compatibility (ADR-0006)
+        Effect.flatMap((gitMounts) =>
+          Effect.tryPromise({
+            try: () =>
+              patchGitMountsForWindows(
+                gitMounts,
+                worktreePath,
+                SANDBOX_REPO_DIR,
+              ),
+            catch: (e) =>
+              new Error(
+                `Failed to patch git mounts: ${e instanceof Error ? e.message : String(e)}`,
+              ),
+          }),
+        ),
         Effect.flatMap((gitMounts) =>
           startSandbox({
             provider,
